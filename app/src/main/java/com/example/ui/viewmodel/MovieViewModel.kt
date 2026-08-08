@@ -710,7 +710,7 @@ class MovieViewModel(application: Application) : AndroidViewModel(application) {
             if (isLoggedIn) {
                 try {
                     val api = MovieBoxRetrofitClient.getApi(prefs)
-                    val action = if (nextState) 1 else 0
+                    val action = if (nextState) 1 else 2
                     val subjectType = if (subject.isTvShow) 2 else 1
                     api.toggleWatchlist(com.example.data.model.WantToSeeRequest(subject.id, action, subjectType))
                     checkUserSession()

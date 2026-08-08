@@ -23,6 +23,10 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 class LocalMovieBoxServer(private val context: Context, private val port: Int = 3000) {
+    companion object {
+        @Volatile
+        private var guestToken: String? = null
+    }
     private var serverSocket: ServerSocket? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isRunning = false
@@ -1126,12 +1130,12 @@ class LocalMovieBoxServer(private val context: Context, private val port: Int = 
         val reversed = timestamp.reversed()
         val clientToken = "$timestamp,${md5(reversed)}"
 
-        val baseUrl = "https://api6.aoneroom.com"
+        val baseUrl = "https://api.inmoviebox.com"
         val fullUrlWithoutQuery = "$baseUrl$endpoint"
 
         val urlBuilder = fullUrlWithoutQuery.toHttpUrl().newBuilder()
         if (!queryParams.containsKey("host")) {
-            urlBuilder.addQueryParameter("host", "api6.aoneroom.com")
+            urlBuilder.addQueryParameter("host", "api.inmoviebox.com")
         }
         queryParams.forEach { (k, v) ->
             urlBuilder.addQueryParameter(k, v)
@@ -1210,19 +1214,24 @@ class LocalMovieBoxServer(private val context: Context, private val port: Int = 
             .header("Accept", accept)
             .header("Content-Type", contentType)
             .header("X-Sign-Version", "2.0")
-            .header("appid", "302770f8bb6543ce8bdff585943a1eca")
-            .header("appkey", "a9d263ae575d4f5d94eab086a150c67e")
+            .header("appid", "4U01pxRu278GqCZKY9")
             .header("region", region)
             .header("lang", "en")
             .header("os", "android")
             .header("X-Timestamp", timestamp)
-            .header("Referer", "https://api6.aoneroom.com/")
+            .header("Referer", "https://api.inmoviebox.com/")
             .header("X-Client-Token", clientToken)
             .header("x-tr-signature", signatureHeader)
             .header("X-Play-Mode", "2")
             .header("X-Client-Info", clientInfoJson)
 
         var savedToken = prefs.getString("auth_token", null)
+        if (savedToken.isNullOrEmpty()) {
+            if (guestToken.isNullOrEmpty()) {
+                bootstrapGuestToken()
+            }
+            savedToken = guestToken
+        }
         if (savedToken.isNullOrEmpty()) {
             savedToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjcwNjU5NDg0MTAyMTM4MTYyMzIsInV0cCI6MSwiZXhwIjoxNzkxNzMyMjMzLCJpYXQiOjE3ODM5NTU5MzN9.7iyEzTj4vWAbOF0oXwNnZ0p3Nc1QaO6K9eMiGFyVfGs"
         }
@@ -1242,6 +1251,94 @@ class LocalMovieBoxServer(private val context: Context, private val port: Int = 
                 .apply()
         }
         return resBody
+    }
+
+    private fun bootstrapGuestToken() {
+        try {
+            android.util.Log.i("LocalMovieBoxServer", "Bootstrapping guest credentials...")
+            val timestamp = System.currentTimeMillis().toString()
+            val reversed = timestamp.reversed()
+            val clientToken = "$timestamp,${md5(reversed)}"
+
+            val baseUrl = "https://api.inmoviebox.com"
+            val endpoint = "/wefeed-mobile-bff/tab-operating"
+            val fullUrl = "$baseUrl$endpoint?host=api.inmoviebox.com&page=1&pageSize=24&tabId=1"
+
+            val canonicalString = "GET\napplication/json\napplication/json;charset=UTF-8\n\n$timestamp\n\n/wefeed-mobile-bff/tab-operating?host=api.inmoviebox.com&page=1&pageSize=24&tabId=1"
+
+            var signatureHeader = ""
+            val keyStr = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O"
+            val keyBytes = try {
+                android.util.Base64.decode(keyStr, android.util.Base64.DEFAULT)
+            } catch (e: Exception) {
+                keyStr.toByteArray()
+            }
+            val signatureDigest = hmacMd5(keyBytes, canonicalString.toByteArray(Charsets.UTF_8))
+            val base64Sig = android.util.Base64.encodeToString(signatureDigest, android.util.Base64.NO_WRAP)
+            signatureHeader = "$timestamp|2|$base64Sig"
+
+            val clientInfoMap = mapOf(
+                "package_name" to "com.movieboxpro.android",
+                "version_name" to "16.2.1",
+                "version_code" to 16210,
+                "os" to "android",
+                "os_version" to "12",
+                "install_ch" to "googleplay",
+                "device_id" to "8c5da15be6ca34e724a27bc102cd8bcf",
+                "install_store" to "googleplay",
+                "gaid" to "",
+                "brand" to "google",
+                "model" to "Pixel 6",
+                "system_language" to "en",
+                "net" to "wifi",
+                "region" to "IN",
+                "timezone" to "Asia/Kolkata",
+                "sp_code" to "404"
+            )
+            val clientInfoJson = toJsonString(clientInfoMap)
+
+            val request = Request.Builder()
+                .url(fullUrl)
+                .header("User-Agent", "MovieBoxPro/16.2.1 (Android 14; com.community.mbox.in)")
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json;charset=UTF-8")
+                .header("X-Sign-Version", "2.0")
+                .header("appid", "4U01pxRu278GqCZKY9")
+                .header("region", "IN")
+                .header("lang", "en")
+                .header("os", "android")
+                .header("X-Timestamp", timestamp)
+                .header("Referer", "https://api.inmoviebox.com/")
+                .header("X-Client-Token", clientToken)
+                .header("x-tr-signature", signatureHeader)
+                .header("X-Play-Mode", "2")
+                .header("X-Client-Info", clientInfoJson)
+                .header("X-Client-Status", "1")
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            val rawToken = response.header("x-user") ?: response.header("X-User")
+            if (!rawToken.isNullOrEmpty()) {
+                val extractedToken = if (rawToken.startsWith("{")) {
+                    val tokenKey = "\"token\":\""
+                    val startIdx = rawToken.indexOf(tokenKey)
+                    if (startIdx != -1) {
+                        val start = startIdx + tokenKey.length
+                        val end = rawToken.indexOf("\"", start)
+                        if (end != -1) rawToken.substring(start, end) else rawToken
+                    } else rawToken
+                } else {
+                    rawToken
+                }
+                guestToken = extractedToken
+                android.util.Log.i("LocalMovieBoxServer", "Successfully bootstrapped dynamic guest token: $guestToken")
+            } else {
+                android.util.Log.e("LocalMovieBoxServer", "Failed to retrieve guest token from response headers. Status: ${response.code}")
+            }
+            response.close()
+        } catch (e: Exception) {
+            android.util.Log.e("LocalMovieBoxServer", "Guest bootstrap exception", e)
+        }
     }
 
     private fun md5(input: String): String {
