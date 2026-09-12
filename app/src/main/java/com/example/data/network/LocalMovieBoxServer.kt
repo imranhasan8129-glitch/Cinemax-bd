@@ -808,8 +808,31 @@ class LocalMovieBoxServer(private val context: Context, private val port: Int = 
                             }
                             
                             val bestStream = sortedDescending[0]
-                            workingUrl = bestStream["url"]?.toString() ?: ""
+                            var url = bestStream["url"]?.toString() ?: ""
                             val bestCookie = bestStream["signCookie"]?.toString() ?: ""
+                            
+                            // Anti-Piracy Dummy Video Bypass
+                            if (bestCookie.contains("urlprefix=")) {
+                                try {
+                                    val prefixStart = bestCookie.indexOf("urlprefix=") + "urlprefix=".length
+                                    var prefixEnd = bestCookie.indexOf(":", prefixStart)
+                                    if (prefixEnd == -1) prefixEnd = bestCookie.indexOf(";", prefixStart)
+                                    if (prefixEnd == -1) prefixEnd = bestCookie.length
+                                    var base64Str = bestCookie.substring(prefixStart, prefixEnd)
+                                    
+                                    val padding = (4 - base64Str.length % 4) % 4
+                                    base64Str += "=".repeat(padding)
+                                    
+                                    val decodedPathBytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
+                                    val decodedPath = String(decodedPathBytes, StandardCharsets.UTF_8)
+                                    url = if (decodedPath.endsWith("/")) "${decodedPath}index.mpd" else "${decodedPath}/index.mpd"
+                                    Log.i("LocalMovieBoxServer", "Dummy video bypassed. Real URL: $url")
+                                } catch (e: Exception) {
+                                    Log.w("LocalMovieBoxServer", "Failed to bypass dummy video: ${e.message}")
+                                }
+                            }
+                            workingUrl = url
+                            
                             if (bestCookie.isNotEmpty()) {
                                 workingCookie = bestCookie
                             }
