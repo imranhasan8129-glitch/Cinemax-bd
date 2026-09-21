@@ -595,7 +595,8 @@ class CookieInterceptor(private val prefs: PreferencesManager) : Interceptor {
 }
 
 object MovieBoxRetrofitClient {
-    private const val BASE_URL = "https://api6.aoneroom.com/"
+    private const val BASE_URL = "https://moviebox-internal-api-nd0r.onrender.com/
+    "
 
     fun getApi(prefs: PreferencesManager): MovieBoxApi {
         val client = OkHttpClient.Builder()
